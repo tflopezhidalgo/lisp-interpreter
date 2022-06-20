@@ -1,3 +1,5 @@
+/doc
 /target
 .clj-kondo
 .lsp
+.lein-failures
