@@ -554,10 +554,10 @@
 (defn actualizar-amb
   "Devuelve un ambiente actualizado con una clave (nombre de la variable o funcion) y su valor.
   Si el valor es un error, el ambiente no se modifica. De lo contrario, se le carga o reemplaza el valor."
-  [e k v]
+  [amb k v]
   (cond
-    (error? v) e
-    :else (apply concat (seq (assoc (apply hash-map e) k v)))))
+    (error? v) amb
+    :else (apply concat (seq (assoc (apply hash-map amb) k v)))))
 
 
 ; user=> (buscar 'c '(a 1 b 2 c 3 d 4 e 5))
@@ -568,9 +568,9 @@
 (defn buscar
   "Busca una clave en un ambiente (una lista con claves en las posiciones impares [1, 3, 5...] y valores en las pares [2, 4, 6...]
    y devuelve el valor asociado. Devuelve un mensaje de error si no la encuentra."
-   [k x]
-   (let [v ((apply hash-map x) k)]
-    (if (nil? v) (list '*error* 'unbound-symbol k) v)))
+   [k amb]
+   (let [a (apply hash-map amb)]
+     (if (contains? a k) (a k) (list '*error* 'unbound-symbol k))))
 
 ; user=> (fnc-append '( (1 2) ))
 ; (*error* too-few-args)
@@ -614,11 +614,10 @@
 
 (defn fnc-env
   "Devuelve la fusion de los ambientes global y local."
-  [x amb-1 amb-2]
+  [x amb-global amb-local]
   (cond
     (seq x) '(*error* too-many-args)
-    :else (apply concat (seq (merge (apply hash-map amb-1) (apply hash-map amb-2))))))
-
+    :else (apply concat (seq (merge (apply hash-map amb-global) (apply hash-map amb-local))))))
 
 ; user=> (fnc-equal '(1 1))
 ; t
@@ -720,7 +719,7 @@
 (defn fnc-add
   "Suma los elementos de una lista. Minimo 2 elementos."
   [x]
-  (let [not-numbers (filter (fn [x] (not (number? x))) x)]
+  (let [not-numbers (filter #(not (number? %)) x)]
     (cond
       (< (count x) 2) '(*error* too-few-args)
       (seq not-numbers) (list '*error* 'number-expected (first not-numbers))
@@ -773,8 +772,8 @@
 (defn fnc-lt
   "Devuelve t si el primer numero es menor que el segundo; si no, nil."
   [x]
-  (let [ari (controlar-aridad x 2)
-        not-numbers (filter (fn [x] (not (number? x))) x)]
+  (let [ari         (controlar-aridad x 2)
+        not-numbers (filter #(not (number? %)) x)]
     (cond
       (seq? ari) ari
       (seq not-numbers) (list '*error* 'number-expected (first not-numbers))
@@ -801,11 +800,11 @@
 (defn fnc-gt
   "Devuelve t si el primer numero es mayor que el segundo; si no, nil."
   [x]
-  (let [ari (controlar-aridad x 2)
+  (let [ari         (controlar-aridad x 2)
         not-numbers (filter (fn [x] (not (number? x))) x)]
     (cond
       (seq? ari) ari
-      (seq not-numbers) (seq ['*error* 'number-expected (first not-numbers)])
+      (seq not-numbers) (list '*error* 'number-expected (first not-numbers))
       (> (first x) (second x)) 't
       :else nil)))
 
@@ -829,8 +828,8 @@
 (defn fnc-ge
   "Devuelve t si el primer numero es mayor o igual que el segundo; si no, nil."
   [x]
-  (let [ari (controlar-aridad x 2)
-        not-numbers (filter (fn [x] (not (number? x))) x)]
+  (let [ari         (controlar-aridad x 2)
+        not-numbers (filter #(not (number? %)) x)]
     (cond
       (seq? ari) ari
       (seq not-numbers) (list '*error* 'number-expected (first not-numbers))
@@ -859,7 +858,6 @@
     (seq? (controlar-aridad x 1)) (controlar-aridad x 1)
     :else  (reverse (first x))))
 
-
 ; user=> (evaluar-escalar 32 '(v 1 w 3 x 6) '(x 5 y 11 z "hola"))
 ; (32 (v 1 w 3 x 6))
 ; user=> (evaluar-escalar "chau" '(v 1 w 3 x 6) '(x 5 y 11 z "hola"))
@@ -878,17 +876,13 @@
 (defn normalizar-simbolo [x] (symbol (clojure.string/lower-case x)))
 
 (defn resolver-escalar
-  [e ambiente]
-  (cond
-    (symbol? e)
-      (let [s (normalizar-simbolo e)]
-        (if (contains? ambiente s) (ambiente s) (list '*error* 'unbound-symbol e)))
-    :else e))
+  [esc amb]
+  (if (symbol? esc) (buscar (normalizar-simbolo esc) amb) esc))
 
 (defn evaluar-escalar
   "Evalua una expresion escalar consultando, si corresponde, los ambientes local y global. Devuelve una lista con el resultado y un ambiente."
   [s amb-global amb-local]
-  (let [ambiente (merge (apply hash-map amb-global) (apply hash-map amb-local))]
+  (let [ambiente (fnc-env '() amb-global amb-local)]
     (list (resolver-escalar s ambiente) amb-global)))
 
 ; user=> (evaluar-de '(de f (x)) '(x 1))
@@ -925,9 +919,12 @@
         cuerpo-fn (rest (rest forma))]
     (cond
       (not (list? (first cuerpo-fn))) (list (list '*error* 'list 'expected (first cuerpo-fn)) amb)
+
       (nil? nombre-fn) (list '(*error* cannot-set nil) amb)
+
       (not (symbol? nombre-fn)) (list (list '*error* 'symbol 'expected nombre-fn) amb)
-      :else (list nombre-fn (fnc-env '() amb (list nombre-fn (cons 'lambda cuerpo-fn)))))))
+
+      :else (list nombre-fn (actualizar-amb amb nombre-fn (cons 'lambda cuerpo-fn))))))
 
 ; user=> (evaluar-if '(if t) '(nil nil t t v 1 w 3 x 6) '(x 5 y 11 z "hola"))
 ; (nil (nil nil t t v 1 w 3 x 6))
@@ -967,6 +964,7 @@
 (defn evaluar-if
   "Evalua una forma 'if'. Devuelve una lista con el resultado y un ambiente eventualmente modificado."
   [forma amb-global amb-local]
+
   (let [f         (rest forma)
         condicion (first f)
         caso-true (second f)
@@ -1057,27 +1055,27 @@
   [forma amb-global amb-local]
 
   (cond
-    (< (count forma) 2) (list '(*error* list expected nil) (apply concat (seq amb-global)))
+    (< (count forma) 2) (list '(*error* list expected nil) amb-global)
 
-    ; No permitamos setear nil.
-    (nil? (first forma)) (list '(*error* cannot-set nil) (apply concat (seq amb-global)))
+    ; No podemos setear nil.
+    (nil? (first forma)) (list '(*error* cannot-set nil) amb-global)
 
     (not (symbol? (first forma)))
-    (list (list '*error* 'symbol 'expected (first forma)) (apply concat (seq amb-global)))
+    (list (list '*error* 'symbol 'expected (first forma)) amb-global)
 
     ; Si tiene mas para reducir lo llamamos recursivo.
     ;; FIXME. Deberiamos mergear con el amb-global (second v)
     ;; FIXME. refactor.
 
     (seq (rest (rest forma)))
-    (let [v (evaluar (second forma) (apply concat (seq amb-global)) (apply concat (seq amb-local)))
-          nuevo-amb-global (merge amb-global (vector (first forma) (first v)))]
+    (let [v                (evaluar (second forma) amb-global amb-local)
+          nuevo-amb-global (actualizar-amb amb-global (first forma) (first v))]
       (recur (rest (rest forma)) nuevo-amb-global amb-local))
 
     :else
-    (let [v (evaluar (second forma) (apply concat (seq amb-global)) (apply concat (seq amb-local)))
-          nuevo-amb-global (merge amb-global (vector (first forma) (first v)))]
-      (list (first v) (apply concat (seq nuevo-amb-global))))))
+    (let [v                (evaluar (second forma) amb-global amb-local)
+          nuevo-amb-global (actualizar-amb amb-global (first forma) (first v))]
+      (list (first v) nuevo-amb-global))))
 
 (defn evaluar-setq
   "Evalua una forma 'setq'. Devuelve una lista con el resultado y un ambiente actualizado."
@@ -1085,7 +1083,7 @@
 
   (if (empty? (rest forma))
     (list '(*error* list expected nil) amb-global)
-    (do-setq (rest forma) (apply hash-map amb-global) (apply hash-map amb-local))))
+    (do-setq (rest forma) amb-global amb-local)))
 
 
 ; Al terminar de cargar el archivo en el REPL de Clojure (con load-file), se debe devolver true.
