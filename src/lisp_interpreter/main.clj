@@ -471,7 +471,7 @@
     (es-vacio? elemento) ""
     (es-secuencia-vacia? elemento) ""
     (number? elemento) elemento
-    (symbol? elemento) (clojure.string/lower-case elemento)
+    (or (symbol? elemento) (seq? elemento)) (symbol (clojure.string/lower-case elemento))
     :else elemento))
 
 (defn igual?
@@ -900,7 +900,7 @@
 ; user=> (evaluar-de '(de f (x y) (+ x y)) '(x 1))
 ; (f (x 1 f (lambda (x y) (+ x y))))
 ; user=> (evaluar-de '(de f (x y) (prin3 x) (terpri) y) '(x 1))
-; (f (x 1 f (lambda (x y) (prin3 x) (terpri) y)))
+; (f, (x 1 f (lambda (x y) (prin3 x) (terpri) y)))
 ; user=> (evaluar-de '(de) '(x 1))
 ; ((*error* list expected nil) (x 1))
 ; user=> (evaluar-de '(de f) '(x 1))
@@ -918,18 +918,16 @@
 ; user=> (evaluar-de '(de nil (x) 2) '(x 1))
 ; ((*error* cannot-set nil) (x 1))
 
-;; FIXME
-
 (defn evaluar-de
-  "Evalua una forma 'de'. Devuelve una lista con el resultado y un ambiente actualizado con la definicion."
-  [forma ambiente]
+  "Evalua una forma 'de'. Devuelve una lista con el resultado y un amb actualizado con la definicion."
+  [forma amb]
   (let [nombre-fn (second forma)
         cuerpo-fn (rest (rest forma))]
     (cond
-      (nil? nombre-fn) (list '(*error* cannot-set nil) ambiente)
-      (not (symbol? nombre-fn)) (list (list '*error* 'symbol 'expected nombre-fn) ambiente)
-      (not (list? (first cuerpo-fn))) (list (list '*error* 'list 'expected (first cuerpo-fn)) ambiente)
-      :else (list nombre-fn (fnc-env '() ambiente (list nombre-fn (cons 'lambda cuerpo-fn)))))))
+      (not (list? (first cuerpo-fn))) (list (list '*error* 'list 'expected (first cuerpo-fn)) amb)
+      (nil? nombre-fn) (list '(*error* cannot-set nil) amb)
+      (not (symbol? nombre-fn)) (list (list '*error* 'symbol 'expected nombre-fn) amb)
+      :else (list nombre-fn (fnc-env '() amb (list nombre-fn (cons 'lambda cuerpo-fn)))))))
 
 ; user=> (evaluar-if '(if t) '(nil nil t t v 1 w 3 x 6) '(x 5 y 11 z "hola"))
 ; (nil (nil nil t t v 1 w 3 x 6))
@@ -969,13 +967,13 @@
 (defn evaluar-if
   "Evalua una forma 'if'. Devuelve una lista con el resultado y un ambiente eventualmente modificado."
   [forma amb-global amb-local]
-  (let [f (rest forma)
+  (let [f         (rest forma)
         condicion (first f)
         caso-true (second f)
 
-        ;; TODO. hay casos en que hay que tomar este y casos en que hay que
-        ;;       tomar el ultimo ???
-        caso-false (nth f 2)
+        ;; Esto es medio tricky. Siempre tomamos el ultimo
+        ;; valor de la condicion.
+        caso-false (last (rest (rest f)))
         resultado (evaluar condicion amb-global amb-local)]
 
     ;; FIXME
@@ -1059,6 +1057,8 @@
   [forma amb-global amb-local]
 
   (cond
+    (< (count forma) 2) (list '(*error* list expected nil) (apply concat (seq amb-global)))
+
     ; No permitamos setear nil.
     (nil? (first forma)) (list '(*error* cannot-set nil) (apply concat (seq amb-global)))
 
@@ -1083,9 +1083,7 @@
   "Evalua una forma 'setq'. Devuelve una lista con el resultado y un ambiente actualizado."
   [forma amb-global amb-local]
 
-  (if (or
-        (odd? (count (rest forma)))
-        (empty? (rest forma)))
+  (if (empty? (rest forma))
     (list '(*error* list expected nil) amb-global)
     (do-setq (rest forma) (apply hash-map amb-global) (apply hash-map amb-local))))
 
