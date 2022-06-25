@@ -3,3 +3,4 @@
 .clj-kondo
 .lsp
 .lein-failures
+**/.DS_Store
