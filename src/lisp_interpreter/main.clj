@@ -680,7 +680,7 @@
   "Devuelve la lectura de un elemento de TLC-LISP desde la terminal/consola."
   [x]
   (cond
-    (seq x) '(*error* not-implemented)
+    (seq? (controlar-aridad x 0)) '(*error* not-implemented)
     :else (read)))
 
 
@@ -696,7 +696,7 @@
   "Imprime un salto de línea y devuelve nil."
   [x]
   (cond
-    (seq x) '(*error* not-implemented)
+    (seq? (controlar-aridad x 0)) '(*error* not-implemented)
     :else (println)))
 
 ; user=> (fnc-add ())
@@ -801,7 +801,7 @@
   "Devuelve t si el primer numero es mayor que el segundo; si no, nil."
   [x]
   (let [ari         (controlar-aridad x 2)
-        not-numbers (filter (fn [x] (not (number? x))) x)]
+        not-numbers (filter #(not (number? %)) x)]
     (cond
       (seq? ari) ari
       (seq not-numbers) (list '*error* 'number-expected (first not-numbers))
@@ -914,9 +914,9 @@
 
 (defn evaluar-de
   "Evalua una forma 'de'. Devuelve una lista con el resultado y un amb actualizado con la definicion."
-  [forma amb]
-  (let [nombre-fn (second forma)
-        cuerpo-fn (rest (rest forma))]
+  [[_ & forma] amb]
+
+  (let [[nombre-fn & cuerpo-fn] forma]
     (cond
       (not (list? (first cuerpo-fn))) (list (list '*error* 'list 'expected (first cuerpo-fn)) amb)
 
@@ -963,24 +963,18 @@
 
 (defn evaluar-if
   "Evalua una forma 'if'. Devuelve una lista con el resultado y un ambiente eventualmente modificado."
-  [forma amb-global amb-local]
+  [[_ & f] amb-global amb-local]
 
-  (let [f         (rest forma)
-        condicion (first f)
-        caso-true (second f)
+  (let [[condicion caso-true & -caso-false] f
 
-        ;; Esto es medio tricky. Siempre tomamos el ultimo
-        ;; valor de la condicion.
-        caso-false (last (rest (rest f)))
-        resultado (evaluar condicion amb-global amb-local)]
-
-    ;; FIXME
-    ;; Aca estamos asumiendo que el if nunca va a modificar el ambiente.
+        ; Siempre tomamos el ultimo valor de la condicion.
+        caso-false (last -caso-false)
+        [resultado nuevo-amb-global] (evaluar condicion amb-global amb-local)]
 
     (cond
-      (error? (first resultado)) resultado
-      (first resultado) (evaluar caso-true amb-global amb-local)
-      :else (evaluar caso-false amb-global amb-local))))
+      (error? resultado) (list resultado nuevo-amb-global)
+      resultado (evaluar caso-true nuevo-amb-global amb-local)
+      :else (evaluar caso-false nuevo-amb-global amb-local))))
 
 ; user=> (evaluar-or '(or) '(nil nil t t w 5 x 4) '(x 1 y nil z 3))
 ; (nil (nil nil t t w 5 x 4))
@@ -1012,17 +1006,22 @@
 (defn do-evaluar-or
   [elementos amb-global amb-local]
 
-  (let [resultado (evaluar (first elementos) amb-global amb-local)]
-    (cond
-      (empty? elementos) (list nil (second resultado))
-      (first resultado) resultado
-      :else (recur (rest elementos) (second resultado) amb-local))))
+  (cond
+    (empty? elementos) (list nil amb-global)
+
+    :else
+    (let [[e & resto]          elementos
+          [v nuevo-amb-global] (evaluar e amb-global amb-local)]
+      (if v
+        (list v nuevo-amb-global)
+        (recur resto nuevo-amb-global amb-local)))))
+
 
 (defn evaluar-or
   "Evalua una forma 'or'. Devuelve una lista con el resultado y un ambiente."
-  [forma amb-global amb-local]
+  [[_ & args] amb-global amb-local]
 
-  (do-evaluar-or (rest forma) amb-global amb-local))
+  (do-evaluar-or args amb-global amb-local))
 
 ; user=> (evaluar-setq '(setq) '(nil nil t t + add w 5 x 4) '(x 1 y nil z 3))
 ; ((*error* list expected nil) (nil nil t t + add w 5 x 4))
@@ -1051,43 +1050,38 @@
 ; user=> (evaluar-setq '(setq x 7 y 8 z 9) '(nil nil t t + add w 5 x 4) '(y nil z 3))
 ; (9 (nil nil t t + add w 5 x 7 y 8 z 9))
 
-(defn do-setq
+(defn do-evaluar-setq
   [forma amb-global amb-local]
 
-  (cond
-    (< (count forma) 2) (list '(*error* list expected nil) amb-global)
+  (let [[k v & r] forma]
 
-    ; No podemos setear nil.
-    (nil? (first forma)) (list '(*error* cannot-set nil) amb-global)
+    (cond
+      (< (count forma) 2) (list '(*error* list expected nil) amb-global)
 
-    (not (symbol? (first forma)))
-    (list (list '*error* 'symbol 'expected (first forma)) amb-global)
+      ; No podemos setear nil.
+      (nil? k) (list '(*error* cannot-set nil) amb-global)
 
-    ; Si tiene mas para reducir lo llamamos recursivo.
-    ;; FIXME. Deberiamos mergear con el amb-global (second v)
-    ;; FIXME. refactor.
+      (not (symbol? k)) (list (list '*error* 'symbol 'expected k) amb-global)
 
-    (seq (rest (rest forma)))
-    (let [v                (evaluar (second forma) amb-global amb-local)
-          nuevo-amb-global (actualizar-amb amb-global (first forma) (first v))]
-      (recur (rest (rest forma)) nuevo-amb-global amb-local))
+      :else
+      (let [[valor nuevo-amb-global] (evaluar v amb-global amb-local)
 
-    :else
-    (let [v                (evaluar (second forma) amb-global amb-local)
-          nuevo-amb-global (actualizar-amb amb-global (first forma) (first v))]
-      (list (first v) nuevo-amb-global))))
+            ;; Tomamos en cuenta el ambiente de la evaluacion
+            nuevo-amb-global (actualizar-amb nuevo-amb-global k valor)]
+
+        (if (seq r)
+
+          ; Si tiene mas para reducir lo llamamos recursivo.
+          (recur r nuevo-amb-global amb-local)
+          (list valor nuevo-amb-global))))))
 
 (defn evaluar-setq
   "Evalua una forma 'setq'. Devuelve una lista con el resultado y un ambiente actualizado."
-  [forma amb-global amb-local]
+  [[_ & forma] amb-global amb-local]
 
-  (if (empty? (rest forma))
-    (list '(*error* list expected nil) amb-global)
-    (do-setq (rest forma) amb-global amb-local)))
+  (do-evaluar-setq forma amb-global amb-local))
 
 
 ; Al terminar de cargar el archivo en el REPL de Clojure (con load-file), se debe devolver true.
 
-(defn main
-  []
-  (repl))
+(def main repl)
