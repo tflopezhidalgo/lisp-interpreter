@@ -175,6 +175,17 @@
     (is (= (fnc-reverse '((1 2 3)) ) '(3 2 1)))
     (is (= (fnc-reverse '((1 2 3)(4)) ) '(*error* too-many-args)))))
 
+(deftest fnc-read-test
+  (testing "casos de uso"
+    (is (= 1 (with-in-str "1" (fnc-read ()))))
+    (is (= 'a (with-in-str "a" (fnc-read ()))))
+    (is (= '(hola mundo) (with-in-str "(hola mundo)" (fnc-read ()))))
+    (is (= '(hola mundo) (with-in-str "(hola \n mundo)" (fnc-read ()))))
+    (is (= nil (with-in-str "()" (fnc-read ()))))
+    (is (= nil (with-in-str "nil" (fnc-read ()))))
+    (is (= '(*error* not-implemented) (fnc-read '(1))))
+    (is (= '(*error* not-implemented) (fnc-read '(1 2))))))
+
 (deftest evaluar-escalar-test
   (testing "casos de uso"
     (is (=
