@@ -495,16 +495,11 @@
 ; user=> (error? nil)
 ; false
 
-(defn safe-lower-case [x]
-  (cond
-    (nil? x) ""
-    :else (clojure.string/lower-case x)))
-
 (defn error?
   "Devuelve true o false, segun sea o no el arg. un mensaje de error (una lista con *error* como primer elemento)."
   [x]
   (cond
-    (seq? x) (= (safe-lower-case (first x)) "*error*")
+    (seq? x) (igual? (first x) '*error*)
     :else false))
 
 ; user=> (revisar-fnc '(*error* too-few-args))
