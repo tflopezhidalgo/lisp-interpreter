@@ -98,7 +98,6 @@
        (println (get (Throwable->map e) :cause))
        (repl amb)))))
 
-
 (defn evaluar
   "Evalua una expresion 'expre' en los ambientes global y local. Devuelve un lista con un valor resultante y un ambiente."
   [expre amb-global amb-local]
@@ -137,7 +136,6 @@
                        (cons (second res-eval-3) (concat (next x) (list (first res-eval-3))))))
                    (cons (list (second res-eval-1)) (next expre)))]
               (aplicar (first res-eval-1) (next res-eval-2) (first res-eval-2) amb-local)))))
-
 
 ; Evalua una macro COND. Siempre devuelve una lista con un resultado y un ambiente.
 (defn evaluar-cond
@@ -506,7 +504,7 @@
   "Devuelve true o false, segun sea o no el arg. un mensaje de error (una lista con *error* como primer elemento)."
   [x]
   (cond
-    (list? x) (= (safe-lower-case (first x)) "*error*")
+    (seq? x) (= (safe-lower-case (first x)) "*error*")
     :else false))
 
 ; user=> (revisar-fnc '(*error* too-few-args))
@@ -554,9 +552,11 @@
   "Devuelve un ambiente actualizado con una clave (nombre de la variable o funcion) y su valor.
   Si el valor es un error, el ambiente no se modifica. De lo contrario, se le carga o reemplaza el valor."
   [amb k v]
-  (cond
-    (error? v) amb
-    :else (apply concat (seq (assoc (apply hash-map amb) k v)))))
+
+  (let [-k (symbol (clojure.string/lower-case k))]
+    (cond
+      (error? v) amb
+      :else (apply concat (seq (assoc (apply hash-map amb) -k v))))))
 
 
 ; user=> (buscar 'c '(a 1 b 2 c 3 d 4 e 5))
@@ -569,7 +569,10 @@
    y devuelve el valor asociado. Devuelve un mensaje de error si no la encuentra."
   [k amb]
   (let [a (apply hash-map amb)]
-    (if (contains? a k) (a k) (list '*error* 'unbound-symbol k))))
+    (cond
+      (contains? a k) (a k)
+      (contains? a (symbol (clojure.string/lower-case k))) (a (symbol (clojure.string/lower-case k)))
+      :else (list '*error* 'unbound-symbol k))))
 
 ; user=> (fnc-append '( (1 2) ))
 ; (*error* too-few-args)
@@ -872,11 +875,9 @@
 ; user=> (evaluar-escalar 'n '(v 1 w 3 x 6) '(x 5 y 11 z "hola"))
 ; ((*error* unbound-symbol n) (v 1 w 3 x 6))
 
-(defn normalizar-simbolo [x] (symbol (clojure.string/lower-case x)))
-
 (defn resolver-escalar
   [esc amb]
-  (if (symbol? esc) (buscar (normalizar-simbolo esc) amb) esc))
+  (if (symbol? esc) (buscar esc amb) esc))
 
 (defn evaluar-escalar
   "Evalua una expresion escalar consultando, si corresponde, los ambientes local y global. Devuelve una lista con el resultado y un ambiente."
@@ -917,7 +918,7 @@
 
   (let [[nombre-fn & cuerpo-fn] forma]
     (cond
-      (not (list? (first cuerpo-fn))) (list (list '*error* 'list 'expected (first cuerpo-fn)) amb)
+      (not (seq? (first cuerpo-fn))) (list (list '*error* 'list 'expected (first cuerpo-fn)) amb)
 
       (nil? nombre-fn) (list '(*error* cannot-set nil) amb)
 
@@ -967,12 +968,12 @@
   (let [[condicion caso-true & -caso-false] f
 
         ; Siempre tomamos el ultimo valor de la condicion.
-        caso-false (last -caso-false)
-        [resultado nuevo-amb-global] (evaluar condicion amb-global amb-local)]
+        caso-false                          (last -caso-false)
+        [resultado nuevo-amb-global]        (evaluar condicion amb-global amb-local)]
 
     (cond
       (error? resultado) (list resultado nuevo-amb-global)
-      resultado (evaluar caso-true nuevo-amb-global amb-local)
+      (not (igual? resultado nil)) (evaluar caso-true nuevo-amb-global amb-local)
       :else (evaluar caso-false nuevo-amb-global amb-local))))
 
 ; user=> (evaluar-or '(or) '(nil nil t t w 5 x 4) '(x 1 y nil z 3))
@@ -1011,7 +1012,7 @@
     :else
     (let [[e & resto]          elementos
           [v nuevo-amb-global] (evaluar e amb-global amb-local)]
-      (if v
+      (if (not (igual? nil v))
         (list v nuevo-amb-global)
         (recur resto nuevo-amb-global amb-local)))))
 
